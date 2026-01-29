@@ -73,7 +73,7 @@ fig, ax = plt.subplots()
 
 # %% 
 # LAG INDICATOR TO CHECK FOR AUTOCORRELATION (PREDICTABILITY)
-master_data["lag_2"] = master_data["ND"].shift(2)
+master_data["lag_2"] = master_data["ND"].shift(1)
 print("Current Period Demand Highly Correlated with Previous Period Demand")
 
 print("-" * 70)
@@ -94,7 +94,6 @@ print(f'Correlation: {round(master_data[["ND", "lag_2"]].corr().iloc[0,1],2)}')
     .format("{:.0f}")
     .highlight_max()
 )
-
 
 # %%
 fig, ax= plt.subplots()
@@ -179,10 +178,17 @@ master_data["valid_from"] = pd.to_datetime(master_data["valid_from"])
 master_data.set_index("valid_from", inplace=True)
 master_data["hour"] = master_data.index.hour
 master_data.head()
-
+# %%
 plunge_events = master_data[master_data["value_inc_vat"] < 0].copy()
-plunge_events["hour"].value_counts().sort_index().plot(kind="bar", color="green", alpha=0.4)
+fig, ax=plt.subplots(figsize=(10,6))
+plunge_events["hour"].value_counts().sort_index().plot(kind="bar", color="blue", 
+alpha=0.4, title = "Daily Distribution of Negative Prices", ylabel="Count",
+xlabel="Period (Hour)", ax=ax)
+ax.axvspan(8,14, color="grey", alpha=0.4)
 
+print(f'There were {(289*30) / 60} hours of negative pricing events in 2025')
+print("""Most events happened between 8:00 and 14:00. There were no instances 
+of negative prices between 15:00 and 19:00 """)
 # %%
 
 # HEAT PUMP PROXY - 
@@ -233,5 +239,3 @@ model.summary()
 # %%
 master_data.head()
 # %%
-
-

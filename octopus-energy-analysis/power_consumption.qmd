@@ -1,0 +1,723 @@
+---
+title: UK Power Consumption
+execute:
+  echo: true
+format:
+  html: default
+embed-resources: true
+code-fold: true
+jupyter:
+  jupytext:
+    formats: ipynb,qmd
+    text_representation:
+      extension: .qmd
+      format_name: quarto
+      format_version: '1.0'
+      jupytext_version: 1.18.1
+  kernelspec:
+    display_name: Python 3 (ipykernel)
+    language: python
+    name: python3
+---
+
+
+How many heatpumps would it take to replace energy imports?
+How much renewable penetration would this replacement represent?
+
+# Demand 
+
+
+```{python}
+# ========================================================================================================
+# Libraries
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import warnings
+warnings.filterwarnings("ignore")
+import seaborn as sns
+from matplotlib.gridspec import GridSpec
+sns.set_style("white")
+
+# ==========================================================================================================
+
+# Read Dataset
+demand = pd.read_csv("demand_data_2025.csv")
+
+# ==========================================================================================================
+
+# Data Prep
+demand["SETTLEMENT_DATE"] = pd.to_datetime(demand["SETTLEMENT_DATE"])
+
+demand = (demand
+    .assign(
+            week_day = demand["SETTLEMENT_DATE"]
+            .dt.day_name(),
+            month = demand["SETTLEMENT_DATE"].dt.month_name(),
+            total_green = demand["EMBEDDED_SOLAR_GENERATION"] + 
+            demand["EMBEDDED_WIND_GENERATION"],
+            residual_mw = lambda x: x["ND"] - x["total_green"],
+            residual_mwh = lambda x: round(x["residual_mw"] * 0.5,0),
+            co2_kg = lambda x: round(x["residual_mwh"] * 394,0),
+           carbon_intensity = lambda x: round(x["co2_kg"] / (x["ND"] * 0.5),0),
+           net_imports= demand["SCOTTISH_TRANSFER"] + demand["IFA_FLOW"] + 
+           demand["IFA2_FLOW"] + demand["BRITNED_FLOW"] +	
+                 demand["MOYLE_FLOW"] + demand["EAST_WEST_FLOW"] + demand["NEMO_FLOW"] +
+            demand["NSL_FLOW"] + demand["ELECLINK_FLOW"] + demand["VIKING_FLOW"] + 
+            demand["GREENLINK_FLOW"],
+            imports_mw = lambda x: x["net_imports"].clip(lower=0),
+            green_mw = lambda x: x["total_green"],
+            domestic_dirty_mw = lambda x: x["ND"] - x["green_mw"] - x["imports_mw"])
+            .set_index("SETTLEMENT_DATE")
+)
+
+
+# ====================================================================================================
+```
+
+```{python}
+fig = plt.figure(layout ="constrained", figsize = (11, 6))
+fig.suptitle("Nationwide Electricity Consumption Patterns, United Kingdom 2025", fontsize = 16, ha = "center")
+
+gs = GridSpec(2,2, figure = fig, wspace = 0.1, hspace = 0.1, width_ratios=[1.2,1.4])
+
+ax1 = plt.subplot(gs.new_subplotspec((0,0), colspan = 1))
+ax2 = plt.subplot(gs.new_subplotspec((0,1), colspan = 1))
+ax3 = plt.subplot(gs.new_subplotspec((1,0), colspan = 1))
+ax4 = plt.subplot(gs.new_subplotspec((1,1), colspan = 1))
+#ax5 = plt.subplot(gs.new_subplotspec((2,0), colspan = 1))
+#====================================================================
+
+demand_by_quarter = (demand
+    .pivot_table(index = pd.Grouper(freq = "QE"), 
+                 values = "ND", 
+                 aggfunc = "sum")
+    #.sort_values(by = "ND", ascending = True)
+ 
+)
+demand_by_quarter.plot(kind = "bar", ax = ax1)
+#ax1.bar(x = demand_by_quarter.index, height = demand_by_quarter["ND"])
+ax1.set_xticklabels(["Q1", "Q2", "Q3", "Q4"], rotation = False)
+
+ax1.set_yticklabels([0, 25, 50, 75, 100, 125])
+ax1.set_ylabel("Million Megawatts")
+
+
+
+ax1.axhline(demand_by_quarter["ND"].mean(), lw=1, color="green",
+           label="Mean: 112.8 Million")
+
+
+
+
+ax1.legend(loc=3)
+
+
+ax1.set_title("Quarterly Demand", color = "grey")
+
+ax1.spines["top"].set_visible(False)
+ax1.spines["right"].set_visible(False)
+
+ax1.spines["bottom"].set_visible(False)
+ax1.set_xlabel("")
+#====================================================================
+
+demand_by_month = (demand
+    .pivot_table(index = pd.Grouper(freq = "ME"), values = "ND", aggfunc="sum")
+    #.sort_values(by = "ND", ascending = False)
+    #.sort_values(by = "ND", ascending = True)
+    )
+
+demand_by_month.plot.bar(ax = ax2)
+
+ax2.axhline(demand_by_month["ND"].mean(), lw=1, color="green",
+           label="Mean: 37.6 Million")
+
+ax2.legend(loc=3)
+
+ax2.set_title("Monthly Demand", color = "grey")
+
+ax2.set_yticklabels([0,10,30,40,50])
+
+ax2.set_ylabel("Million Megawatts")
+
+ax2.set_xticklabels(["Jan", "Feb", "Mar", "Apr", "May",
+              "Jun", "Jul", "Aug", "Sep", "Oct",
+              "Nov", "Dec"], rotation = False)
+
+ax2.spines["top"].set_visible(False)
+ax2.spines["right"].set_visible(False)
+
+ax2.spines["bottom"].set_visible(False)
+ax2.set_xlabel("")
+
+#ax2.yaxis_inverted(True)
+
+#=====================================================================
+
+demand_by_day_of_week = (demand
+    .pivot_table(index = "week_day", 
+                 values = "ND", 
+                 aggfunc="sum")
+    #.sort_values(by = "ND", ascending = True)
+)
+
+new_index = ["Monday", "Tuesday", "Wednesday", 
+             "Thursday", "Friday", "Saturday", "Sunday"]
+
+demand_by_day_of_week.reindex(new_index).plot(kind = "bar", ax = ax3, rot=45)
+
+ax3.set_title("Weekly Demand", color = "grey")
+
+ax3.spines["top"].set_visible(False)
+ax3.spines["right"].set_visible(False)
+
+ax3.spines["bottom"].set_visible(False)
+ax3.set_xlabel("")
+#ax3.set_xticklabels(["Fri", "Mon", "Sat"]rotation = False)
+ax3.xaxis_date()
+
+#======================================================================
+
+demand_per_day = (demand
+    .pivot_table(index = "SETTLEMENT_PERIOD", 
+                 values = "ND",
+                 aggfunc = "sum")
+    #.sort_values(by = "ND", ascending = False))
+                 )
+
+demand_per_day.plot(kind = "bar", ax = ax4)
+
+ax4.set_title("Daily Demand", color = "grey")
+
+ax4.spines["top"].set_visible(False)
+ax4.spines["right"].set_visible(False)
+
+ax4.spines["bottom"].set_visible(False)
+ax4.set_xlabel("");
+```
+
+```{python}
+demand_by_month["ND"].mean()
+```
+
+```{python}
+demand_by_quarter["ND"].std()
+```
+
+```{python}
+demand_by_day_of_week
+```
+
+Quarter one has the highest demand perhaps due to factories working at full
+capacity to deliver fulfill orders due throughout the year
+
+# Total Green Energy
+
+```{python}
+#| jupyter: {source_hidden: true}
+fig = plt.figure(layout="constrained", figsize=(10, 5))
+fig.suptitle("Green Energy Production Patterns, United Kingdom 2025", fontsize = 16, ha = "center")
+
+gs = GridSpec(2, 2, figure=fig, wspace=0.1, hspace=0.1,
+              width_ratios=[1.2, 1.4])
+
+
+
+ax1 = plt.subplot(gs.new_subplotspec((0, 0), colspan=1))
+ax2 = plt.subplot(gs.new_subplotspec((0, 1), colspan=1))
+ax3 = plt.subplot(gs.new_subplotspec((1, 0), colspan=1))
+ax4 = plt.subplot(gs.new_subplotspec((1, 1), colspan=1))
+
+# ===================================================================
+total_green_by_quarter = (demand.pivot_table(
+    index=pd.Grouper(freq="QE"),
+    values="total_green", aggfunc="sum")
+ )
+total_green_by_quarter.plot(kind="bar", ax=ax1)
+
+ax1.set_xticklabels(["Q1", "Q2", "Q3", "Q4"], rotation=False)
+ax1.set_title("Quarter", color="grey")
+
+ax1.spines["top"].set_visible(False)
+ax1.spines["right"].set_visible(False)
+
+ax1.spines["bottom"].set_visible(False)
+ax1.set_xlabel("")
+ax1.legend("")
+# =========================================================================================
+total_green_by_month = (demand.pivot_table(index=pd.Grouper(freq="ME"),
+                        values="total_green", aggfunc="sum")
+                        )
+
+total_green_by_month.plot.bar(ax=ax2)
+ax2.set_title("Month", color = "grey")
+ax2.set_xticklabels(["Jan", "Feb", "Mar", "Apr", "May",
+                     "Jun", "Jul", "Aug", "Sep", "Oct",
+                     "Nov", "Dec"], rotation=False)
+
+
+
+ax2.spines["top"].set_visible(False)
+ax2.spines["right"].set_visible(False)
+ax2.spines["bottom"].set_visible(False)
+ax2.set_xlabel("")
+ax2.legend("")
+# ax2.yaxis_inverted(True)
+# ==========================================================================================
+total_green_by_day_of_week = (demand.pivot_table(
+    index="week_day",
+    values="total_green",
+    aggfunc="sum")
+                             )
+new_index = ["Monday", "Tuesday", "Wednesday", 
+             "Thursday", "Friday", "Saturday", "Sunday"]
+total_green_by_day_of_week.reindex(new_index).plot(kind = "bar", ax = ax3, rot=45)
+
+ax3.set_title("Day", color="grey")
+ax3.spines["top"].set_visible(False)
+ax3.spines["right"].set_visible(False)
+ax3.spines["bottom"].set_visible(False)
+ax3.set_xlabel("")
+# ax3.set_xticklabels(["Fri", "Mon", "Sat"]rotation = False)
+ax3.xaxis_date()
+ax3.legend("")
+# ============================================================================================
+total_green_per_day = (demand
+                .pivot_table(index="SETTLEMENT_PERIOD",
+                values="total_green",
+                aggfunc="sum")
+                     )
+
+total_green_per_day.plot(kind = "bar", ax = ax4)
+
+ax4.set_title("Period of Day", color="grey")
+
+ax4.spines["top"].set_visible(False)
+ax4.spines["right"].set_visible(False)
+
+ax4.spines["bottom"].set_visible(False)
+ax4.set_xlabel("")
+ax4.legend("");
+```
+
+## Total Green vs Residual
+
+```{python}
+#| editable: true
+#| slideshow: {slide_type: ''}
+fig=plt.figure(layout="constrained", figsize=(10, 5))
+
+gs=GridSpec(2,2, figure = fig, width_ratios=[1,1.5,])
+ax1 = plt.subplot(gs.new_subplotspec((0,0), colspan = 1))
+ax2 = plt.subplot(gs.new_subplotspec((0,1), colspan = 1))
+ax3 = plt.subplot(gs.new_subplotspec((1,0), colspan = 1))
+ax4 = plt.subplot(gs.new_subplotspec((1,1), colspan = 1))
+
+fig.suptitle("Residual vs Green Energy Composition, United Kingdom (2025)")
+# ===========================================================
+residual_vs_green_quarterly = pd.concat([demand
+    .pivot_table(values="residual_mw", index=pd.Grouper(freq="QE"), 
+                aggfunc="sum"),
+          demand
+     .pivot_table(values="total_green", index=pd.Grouper(freq="QE"), 
+                aggfunc="sum")], axis = 1).apply(lambda x: x * 100 / sum(x), axis = 1)
+
+
+residual_vs_green_quarterly.plot(kind="bar", ax=ax1, stacked = True)
+
+
+ax1.set_xticklabels(["Q1", "Q2", "Q3", "Q4"], rotation = False)
+
+ax1.spines["top"].set_visible(False)
+ax1.spines["right"].set_visible(False)
+
+ax1.spines["bottom"].set_visible(False)
+ax1.set_xlabel("")
+ax1.legend("")
+# ====================================================================================
+residual_vs_green_monthly = pd.concat([demand
+    .pivot_table(values="residual_mw", index="month", 
+                aggfunc="sum"),
+          demand
+     .pivot_table(values="total_green", index="month", 
+                aggfunc="sum")], axis = 1).apply(lambda x: x * 100 / sum(x), axis = 1)
+
+new_index = ["January", "February", "March", "April",
+            "May", "June", "July", "August", 
+            "September", "October", "November", "December", ]
+residual_vs_green_monthly = residual_vs_green_monthly.reindex(index = new_index)
+
+
+#residual_vs_green_monthly.plot(kind="bar", ax=ax2, stacked = True,rot=45)
+
+ax2.set_xticklabels(["Jan", "Feb", "Mar", "Apr", "May",
+                      "Jun", "Jul", "Aug", "Sep", "Oct",
+                      "Nov", "Dec"], rotation = False)
+
+#ax2.invert_yaxis()
+
+twinx= ax2.twinx()
+residual_vs_green_monthly.plot(kind="bar", ax=twinx, stacked=True)
+
+ax2.spines["top"].set_visible(False)
+ax2.spines["right"].set_visible(False)
+ax2.spines["bottom"].set_visible(False)
+ax2.spines["left"].set_visible(False)
+ax2.set_xlabel("")
+ax2.legend("")
+
+ax2.axis("off")
+
+
+twinx.spines["top"].set_visible(False)
+twinx.spines["right"].set_visible(False)
+twinx.spines["bottom"].set_visible(False)
+#twinx.spines["left"].set_visible(False)
+twinx.set_xlabel("")
+twinx.legend("")
+# =====================================================================================
+residual_vs_green_daily = pd.concat([demand
+    .pivot_table(values="residual_mw", index="week_day", 
+                aggfunc="sum"),
+          demand
+     .pivot_table(values="total_green", index="week_day", 
+                aggfunc="sum")], axis = 1).apply(lambda x: x * 100 / sum(x), axis = 1)
+
+residual_vs_green_daily.plot(kind="bar", ax=ax3, stacked = True, rot=45)
+
+ax3.spines["top"].set_visible(False)
+ax3.spines["right"].set_visible(False)
+
+ax3.spines["bottom"].set_visible(False)
+ax3.set_xlabel("")
+ax3.legend("")
+# ====================================================================================
+
+residual_vs_green_set_period = pd.concat([demand
+    .pivot_table(values="residual_mw", index="SETTLEMENT_PERIOD", 
+                aggfunc="sum"),
+          demand
+     .pivot_table(values="total_green", index="SETTLEMENT_PERIOD", 
+                aggfunc="sum")], axis = 1).apply(lambda x: x * 100 / sum(x), axis = 1)
+
+residual_vs_green_set_period.drop(index=[49,50], inplace=True)
+
+residual_vs_green_set_period.plot(kind="bar", ax=ax4, stacked=True)
+
+ax4.spines["top"].set_visible(False)
+ax4.spines["right"].set_visible(False)
+ax4.spines["bottom"].set_visible(False)
+ax4.legend("");
+```
+
+## Solar vs Solar Capacity
+
+```{python}
+#| jupyter: {source_hidden: true}
+fig = plt.figure(layout = "constrained", figsize=(10,7))
+
+gs=GridSpec(2,2, figure = fig, width_ratios=[1,1.5])
+ax1 = plt.subplot(gs.new_subplotspec((0,0), colspan = 1))
+ax2 = plt.subplot(gs.new_subplotspec((0,1), colspan = 1))
+ax3 = plt.subplot(gs.new_subplotspec((1,0), colspan = 1))
+ax4 = plt.subplot(gs.new_subplotspec((1,1), colspan = 1))
+
+fig.suptitle("Solar Energy Production vs Capacity of Production, United Kingdom 2025", 
+             fontsize = 16, ha = "center")
+# =========================================================================================
+solar_vs_capacity_quarter = (demand.pivot_table(
+    index=pd.Grouper(freq="QE"),
+    values=["EMBEDDED_SOLAR_GENERATION", "EMBEDDED_SOLAR_CAPACITY"], aggfunc="sum")
+  ).apply(lambda x: x * 100 / sum(x), axis=1)
+
+solar_vs_capacity_quarter.plot(kind="bar", ax=ax1, stacked=True)
+
+ax1.set_xticklabels(["Q1", "Q2", "Q3", "Q4"], rotation=False)
+ax1.set_title("Total Green Energy by Quarter")
+
+ax1.spines["top"].set_visible(False)
+ax1.spines["right"].set_visible(False)
+
+ax1.spines["bottom"].set_visible(False)
+ax1.set_xlabel("")
+ax1.legend("")
+
+# =============================================================================================
+
+solar_vs_capacity_month = (demand.pivot_table(
+    index=pd.Grouper(freq="ME"),
+    values=["EMBEDDED_SOLAR_GENERATION", "EMBEDDED_SOLAR_CAPACITY"], aggfunc="sum")
+  ).apply(lambda x: x * 100 / sum(x), axis=1)
+
+solar_vs_capacity_month.plot(kind="bar", ax=ax2, stacked=True)
+
+ax2.set_xticklabels(["Jan", "Feb", "Mar", "Apr", "May",
+                     "Jun", "Jul", "Aug", "Sep", "Oct",
+                     "Nov", "Dec"], rotation=False)
+
+ax2.spines["top"].set_visible(False)
+ax2.spines["right"].set_visible(False)
+
+ax2.spines["bottom"].set_visible(False)
+ax2.set_xlabel("")
+ax2.legend("")
+# ==============================================================================================
+
+solar_vs_capacity_daily = (demand.pivot_table(
+    index="week_day",
+    values=["EMBEDDED_SOLAR_GENERATION", "EMBEDDED_SOLAR_CAPACITY"], aggfunc="sum")
+  ).apply(lambda x: x * 100 / sum(x), axis=1)
+
+solar_vs_capacity_daily.plot(kind="bar", ax=ax3, stacked=True, rot=45)
+
+ax3.spines["top"].set_visible(False)
+ax3.spines["right"].set_visible(False)
+
+ax3.spines["bottom"].set_visible(False)
+ax3.set_xlabel("")
+ax3.legend("")
+# ===============================================================================================
+
+solar_vs_capacity_period = (demand.pivot_table(
+    index="SETTLEMENT_PERIOD",
+    values=["EMBEDDED_SOLAR_GENERATION", "EMBEDDED_SOLAR_CAPACITY"], aggfunc="sum")
+  ).apply(lambda x: x * 100 / sum(x), axis=1)
+
+solar_vs_capacity_period.drop(index=[49,50], inplace=True)
+
+solar_vs_capacity_period.plot(kind="bar", ax=ax4, stacked=True)
+
+
+ax4.spines["top"].set_visible(False)
+ax4.spines["right"].set_visible(False)
+
+ax4.spines["bottom"].set_visible(False)
+ax4.set_xlabel("")
+ax4.legend("");
+```
+
+## Wind vs Wind Capacity
+
+```{python}
+#| jupyter: {source_hidden: true}
+fig=plt.figure(layout="constrained", figsize=(10, 5))
+
+gs=GridSpec(2,2, figure = fig, width_ratios=[1,1.5,])
+ax1 = plt.subplot(gs.new_subplotspec((0,0), colspan = 1))
+ax2 = plt.subplot(gs.new_subplotspec((0,1), colspan = 1))
+ax3 = plt.subplot(gs.new_subplotspec((1,0), colspan = 1))
+ax4 = plt.subplot(gs.new_subplotspec((1,1), colspan = 1))
+
+fig.suptitle("Wind Energy Production vs Capacity of Production, United Kingdom (2025)")
+# ========================================================================================================
+wind_vs_capacity_quarterly = (demand
+    .pivot_table(values=["EMBEDDED_WIND_CAPACITY", "EMBEDDED_WIND_GENERATION"], index=pd.Grouper(freq="QE"), 
+                aggfunc="sum").apply(lambda x: x * 100 / sum(x), axis = 1)
+                             )
+    
+
+wind_vs_capacity_quarterly.plot(kind="bar", ax=ax1, stacked = True)
+ax1.set_xticklabels(["Q1", "Q2", "Q3", "Q4"], rotation = False)
+
+ax1.spines["top"].set_visible(False)
+ax1.spines["right"].set_visible(False)
+
+ax1.spines["bottom"].set_visible(False)
+ax1.set_xlabel("")
+
+ax1.legend("")
+# =========================================================================================================
+new_index=["January", "February", "March", "April", "May",
+                      "June", "July", "August", "September", "October",
+                      "November", "December"]
+
+
+wind_vs_capacity_monthly = (demand
+    .pivot_table(values=["EMBEDDED_WIND_CAPACITY", "EMBEDDED_WIND_GENERATION"], 
+                  index="month", aggfunc="sum")
+    .reindex(index=new_index)
+    .apply(lambda x: x * 100 / sum(x), axis = 1)
+    .plot(kind="bar", stacked=True, ax=ax2, rot=45)
+                          
+                           
+                           )
+
+#wind_vs_capacity_monthly.plot(kind="bar", ax=ax2, stacked = True,rot=45)
+
+# ax2.set_xticklabels(["Jan", "Feb", "Mar", "Apr", "May",
+#                       "Jun", "Jul", "Aug", "Sep", "Oct",
+#                       "Nov", "Dec"], rotation = False)
+
+ax2.spines["top"].set_visible(False)
+ax2.spines["right"].set_visible(False)
+
+ax2.spines["bottom"].set_visible(False)
+ax2.set_xlabel("")
+ax2.legend("")
+# =====================================================================================
+wind_vs_capacity_daily = (demand
+    .pivot_table(values=["EMBEDDED_WIND_CAPACITY", "EMBEDDED_WIND_GENERATION"], index="week_day", 
+                aggfunc="sum").apply(lambda x: x * 100 / sum(x), axis = 1)
+                         )
+wind_vs_capacity_daily.plot(kind="bar", ax=ax3, stacked = True, rot=45)
+
+ax3.spines["top"].set_visible(False)
+ax3.spines["right"].set_visible(False)
+
+ax3.spines["bottom"].set_visible(False)
+ax3.set_xlabel("")
+ax3.legend("")
+# ====================================================================================
+
+wind_vs_capacity_set_period = (demand
+    .pivot_table(values=["EMBEDDED_WIND_CAPACITY", "EMBEDDED_WIND_GENERATION"], index="SETTLEMENT_PERIOD", 
+                aggfunc="sum").apply(lambda x: x * 100 / sum(x), axis = 1))
+
+
+
+# residual_vs_green_set_period = pd.concat([demand
+#     .pivot_table(values="residual_mw", index="SETTLEMENT_PERIOD", 
+#                 aggfunc="sum"),
+#           demand
+#      .pivot_table(values="total_green", index="SETTLEMENT_PERIOD", 
+#                 aggfunc="sum")], axis = 1).apply(lambda x: x * 100 / sum(x), axis = 1)
+wind_vs_capacity_set_period.drop(index=[49,50], inplace=True)
+wind_vs_capacity_set_period.plot(kind="bar", ax=ax4, stacked=True)
+
+ax4.spines["top"].set_visible(False)
+ax4.spines["right"].set_visible(False)
+ax4.spines["bottom"].set_visible(False)
+
+ax4.legend("");
+```
+
+```{python}
+#| jupyter: {source_hidden: true}
+# I should have one pie chart with all the generated solar energy by quarter
+# It's implied that capacity is 100% of installed capacity so no need to show it
+```
+
+## Imports - Exports
+
+```{python}
+#| jupyter: {source_hidden: true}
+fig=plt.figure(layout="constrained", figsize=(10, 7))
+
+gs=GridSpec(2,2, figure = fig, width_ratios=[1,1.5,])
+ax1 = plt.subplot(gs.new_subplotspec((0,0), colspan = 1))
+ax2 = plt.subplot(gs.new_subplotspec((0,1), colspan = 1))
+ax3 = plt.subplot(gs.new_subplotspec((1,0), colspan = 1))
+ax4 = plt.subplot(gs.new_subplotspec((1,1), colspan = 1))
+
+fig.suptitle("Demand Composition Overview, United Kingdom (2025)")
+# ========================================================================================================
+demand_compopsition_quarter = (demand
+    .pivot_table(values=["green_mw", "domestic_dirty_mw", "imports_mw"], index=pd.Grouper(freq="QE"), 
+                aggfunc="sum")
+                .apply(lambda x: x * 100 / sum(x), axis = 1)
+                             )
+    
+
+demand_compopsition_quarter.plot(kind="bar", ax=ax1, stacked=True)
+ax1.set_xticklabels(["Q1", "Q2", "Q3", "Q4"], rotation = False)
+
+ax1.spines["top"].set_visible(False)
+ax1.spines["right"].set_visible(False)
+
+ax1.spines["bottom"].set_visible(False)
+ax1.set_xlabel("")
+
+ax1.legend(fontsize=8)
+# =========================================================================================================
+new_index=["January", "February", "March", "April", "May",
+                      "June", "July", "August", "September", "October",
+                      "November", "December"]
+
+
+demand_compopsition_month = (demand
+    .pivot_table(values=["green_mw", "domestic_dirty_mw", "imports_mw"], 
+                  index="month", aggfunc="sum")
+    .reindex(index=new_index)
+    .apply(lambda x: x * 100 / sum(x), axis = 1)
+    .plot(kind="bar", stacked=True, ax=ax2, rot=45)
+                          
+                           
+                           )
+
+#wind_vs_capacity_monthly.plot(kind="bar", ax=ax2, stacked = True,rot=45)
+
+# ax2.set_xticklabels(["Jan", "Feb", "Mar", "Apr", "May",
+#                       "Jun", "Jul", "Aug", "Sep", "Oct",
+#                       "Nov", "Dec"], rotation = False)
+
+ax2.spines["top"].set_visible(False)
+ax2.spines["right"].set_visible(False)
+
+ax2.spines["bottom"].set_visible(False)
+ax2.set_xlabel("")
+ax2.legend("")
+# =====================================================================================
+demand_composition_day = (demand
+    .pivot_table(values=["green_mw", "domestic_dirty_mw", "imports_mw"], index="week_day", 
+                aggfunc="sum").apply(lambda x: x * 100 / sum(x), axis = 1)
+                         )
+demand_composition_day.plot(kind="bar", ax=ax3, stacked = True, rot=45)
+
+ax3.spines["top"].set_visible(False)
+ax3.spines["right"].set_visible(False)
+
+ax3.spines["bottom"].set_visible(False)
+ax3.set_xlabel("")
+ax3.legend("")
+# ====================================================================================
+
+demand_composition_set_period = (demand
+    .pivot_table(values=["green_mw", "domestic_dirty_mw", "imports_mw"], index="SETTLEMENT_PERIOD", 
+                aggfunc="sum").apply(lambda x: x * 100 / sum(x), axis = 1))
+
+
+
+# residual_vs_green_set_period = pd.concat([demand
+#     .pivot_table(values="residual_mw", index="SETTLEMENT_PERIOD", 
+#                 aggfunc="sum"),
+#           demand
+#      .pivot_table(values="total_green", index="SETTLEMENT_PERIOD", 
+#                 aggfunc="sum")], axis = 1).apply(lambda x: x * 100 / sum(x), axis = 1)
+demand_composition_set_period.drop(index=[49,50], inplace=True)
+demand_composition_set_period.plot(kind="bar", ax=ax4, stacked=True)
+
+# ax4.spines["top"].set_visible(False)
+# ax4.spines["right"].set_visible(False)
+# ax4.spines["bottom"].set_visible(False)
+
+for ax in axes.flat:
+    ax.spines[["top", "right", "bottom"]].set_visible(False)
+
+ax4.legend("");
+```
+
+
+```{python}
+fig, ax = plt.subplots()
+
+(demand.pivot_table(index="SETTLEMENT_PERIOD", values=["total_green", "domestic_dirty_mw", "net_imports"])
+#.apply(lambda x: x *100 / sum(x), axis = 1)
+.plot.area(ax=ax, alpha=0.5, stacked=True))
+
+ax.axvspan(xmax= 35, xmin= 45, color="grey", alpha=0.5)
+ax.text(35, 45, """Peak Demand\nhousehold/factory\nconsumption overllap""", fontsize=8)
+```
+
+# IMPORT SOURCES ANALYSIS
+
+```{python}
+demand["IFA_FLOW"].plot()
+```
+
+
+
+
+
+
+

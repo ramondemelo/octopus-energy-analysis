@@ -1,0 +1,223 @@
+{
+  "cells": [
+    {
+      "cell_type": "code",
+      "metadata": {},
+      "source": [
+        "import numpy as np\n",
+        "import pandas as pd\n",
+        "import statsmodels.api as sm\n",
+        "import matplotlib.pyplot as plt"
+      ],
+      "id": "ccc20536",
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "code",
+      "metadata": {},
+      "source": [
+        "octo=pd.read_csv(\"octopus_prices_full_2025.csv\")\n",
+        "octo.head()"
+      ],
+      "id": "9db43b0f",
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "code",
+      "metadata": {},
+      "source": [
+        "octo.info()"
+      ],
+      "id": "bfb41b36",
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "code",
+      "metadata": {},
+      "source": [
+        "octo = octo.drop(columns=[\"payment_method\", \"valid_to\", \"value_exc_vat\"])\n",
+        "octo[\"valid_from\"]=pd.to_datetime(octo[\"valid_from\"])\n",
+        "octo.set_index(\"valid_from\", inplace=True)"
+      ],
+      "id": "fca7bad3",
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {},
+      "source": [
+        "# SMOOTHING\n"
+      ],
+      "id": "62ce5c71"
+    },
+    {
+      "cell_type": "code",
+      "metadata": {},
+      "source": [
+        "plt.plot(octo.loc[\"2025-01-01\"])\n",
+        "plt.plot(octo.loc[\"2025-01-01\"].rolling(6).mean())"
+      ],
+      "id": "acecb515",
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "code",
+      "metadata": {},
+      "source": [
+        "octo.rolling(24*30).mean().plot()"
+      ],
+      "id": "cdf74fdb",
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "code",
+      "metadata": {},
+      "source": [
+        "octo[\"ND\"].plot(kind=\"hist\")"
+      ],
+      "id": "576687ad",
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "code",
+      "metadata": {},
+      "source": [
+        "demand = pd.read_csv(\"demand_data_2025.csv\")"
+      ],
+      "id": "24a448af",
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "code",
+      "metadata": {},
+      "source": [
+        "demand[\"ND\"].plot(kind=\"hist\")"
+      ],
+      "id": "949b3127",
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "code",
+      "metadata": {},
+      "source": [
+        "demand[\"ND\"].plot()"
+      ],
+      "id": "04307abd",
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "code",
+      "metadata": {},
+      "source": [
+        "demand[\"ND\"].sum()"
+      ],
+      "id": "33bf9764",
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "code",
+      "metadata": {},
+      "source": [
+        "demand[]"
+      ],
+      "id": "86c90b81",
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "code",
+      "metadata": {},
+      "source": [
+        "import seaborn as sns\n",
+        "sns.boxenplot(demand[\"ND\"])"
+      ],
+      "id": "5d93d2fc",
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "code",
+      "metadata": {},
+      "source": [
+        "fig, ax=plt.subplots(nrows=1,ncols=2)\n",
+        "\n",
+        "ax[0].boxplot(demand[\"ND\"])\n",
+        "ax[1].hist(demand[\"ND\"])"
+      ],
+      "id": "6e526f59",
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "code",
+      "metadata": {},
+      "source": [
+        "demand.head()"
+      ],
+      "id": "3d13c1f8",
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "code",
+      "metadata": {},
+      "source": [
+        "demand[\"ND\"].idxmax()"
+      ],
+      "id": "2a795ada",
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "code",
+      "metadata": {},
+      "source": [
+        "demand.iloc[148].to_frame().transpose()"
+      ],
+      "id": "19d7416a",
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "code",
+      "metadata": {},
+      "source": [
+        "sns.hist"
+      ],
+      "id": "c841a2c8",
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "code",
+      "metadata": {},
+      "source": [
+        "Ii"
+      ],
+      "id": "b0eb270e",
+      "execution_count": null,
+      "outputs": []
+    }
+  ],
+  "metadata": {
+    "kernelspec": {
+      "name": "python3",
+      "language": "python",
+      "display_name": "Python 3 (ipykernel)",
+      "path": "/home/ramon/jupyter_env/share/jupyter/kernels/python3"
+    }
+  },
+  "nbformat": 4,
+  "nbformat_minor": 5
+}

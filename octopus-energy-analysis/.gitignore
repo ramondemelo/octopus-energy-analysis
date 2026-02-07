@@ -1,0 +1,22 @@
+# Ignore data files
+#*.csv
+*.xlsx
+
+# Ignore Python overhead
+__pycache__/
+.env
+
+# Ignore OS junk
+.DS_Store
+
+# Ignore .ipynb files
+*.ipynb
+
+# Ignore .deb files
+*.deb
+
+# Jupyter and Quarto junk
+.ipynb_checkpoints/
+.virtual_documents/
+*_files/
+.quarto/

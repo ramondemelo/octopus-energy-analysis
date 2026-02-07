@@ -1,0 +1,236 @@
+---
+title: "Octopus Energy Grid Analysis"
+author: "Ramon"
+format: 
+  pdf:
+    toc: true
+    code-fold: true
+    theme: cosmo
+execute:
+  echo: false
+---
+
+```{python}
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+from matplotlib.gridspec import GridSpec
+import statsmodels.api as sm
+
+
+neso=pd.read_csv("/home/ramondemelo/Documents/Electricity Analysis/demand_data_2025.csv")
+octopus=pd.read_csv("/home/ramondemelo/Documents/Electricity Analysis/octopus_prices_full_2025.csv")
+weather=pd.read_csv("/home/ramondemelo/Documents/Electricity Analysis/uk_weather_2025_historical.csv")
+
+```
+
+```{python} 
+# Renewable Penetration Variable
+neso = ((neso.assign(renewable_penetration=(neso["EMBEDDED_SOLAR_GENERATION"] + 
+             neso["EMBEDDED_WIND_GENERATION"]) / neso["ND"]))
+)
+
+# Create Master Dataset
+weather["time"] = pd.to_datetime(weather["time"])
+weather.set_index("time", inplace=True)
+weather = weather.resample("30min").interpolate(method="linear")
+octopus.reset_index(inplace=True)
+weather.reset_index(inplace=True)
+master_data = pd.concat([neso, octopus, weather], axis=1).reindex(weather.index)
+
+# Create Lag Variable
+master_data["lag_1"] = master_data["ND"].shift(1)
+master_data["lag_1"] = master_data["lag_1"].fillna(0)
+
+# Identify Peak Demand Variance Through Time
+(master_data
+    .assign(date = master_data["SETTLEMENT_DATE"].astype("datetime64[ns]"))
+    .set_index("date")
+    .pivot_table(values="ND", index=pd.Grouper(freq="ME"), columns="SETTLEMENT_PERIOD", aggfunc="max")
+    .transpose()
+    .style
+    .format("{:.0f}")
+    .highlight_max()
+)
+
+# Workday Logic to Quantify Weekend Impact
+master_data["SETTLEMENT_DATE"]=pd.to_datetime(master_data["SETTLEMENT_DATE"])
+master_data["week_day"] = master_data["SETTLEMENT_DATE"].dt.dayofweek
+master_data.set_index("SETTLEMENT_DATE")
+
+# Z-Score Standardization for Comparison
+master_data['z_demand'] = (master_data['ND'] - master_data['ND'].mean()) / master_data['ND'].std()
+master_data['z_radiation'] = (master_data['shortwave_radiation'] - master_data['shortwave_radiation'].mean()) / master_data['shortwave_radiation'].std()
+
+
+# Identify Plunge Price Events
+master_data["price_category"] = np.where(master_data["value_inc_vat"] < 0, "plunge", "chargeable")
+master_data["valid_from"] = pd.to_datetime(master_data["valid_from"])
+master_data.set_index("valid_from", inplace=True)
+master_data["hour"] = master_data.index.hour
+
+# Heat Pump Proxy
+bins=[0,150,450,900]
+labels=["low", "medium", "strong"]
+master_data["radiation_strength"] = pd.cut(master_data["shortwave_radiation"], bins=bins, labels=labels)
+master_data["radiation_strength"].value_counts()
+
+# Net Demand
+master_data["net_demand"] = master_data["ND"] - (master_data["EMBEDDED_WIND_GENERATION"] +
+master_data["EMBEDDED_SOLAR_GENERATION"])
+
+
+# Workday Variable
+master_data["workday"] = master_data.index.dayofweek
+master_data["ramp_rate_mw"] = master_data["ND"].diff()
+master_data["ramp_rate_mw"] = master_data["ramp_rate_mw"].fillna(0)
+master_data["EMBEDDED_WIND_CAPACITY"] =master_data["EMBEDDED_WIND_CAPACITY"].fillna(0)
+```
+
+
+
+```{python}
+
+X = sm.add_constant(master_data[["ramp_rate_mw", 
+                               "lag_1", 
+                                "workday", 
+                                "z_radiation", 
+                                "z_demand", 
+                                "net_demand", 
+                                "shortwave_radiation",
+                                "temperature_2m",
+                                "EMBEDDED_SOLAR_GENERATION",
+                                "EMBEDDED_WIND_GENERATION",
+                                "hour",
+                                "wind_speed_10m",
+                                "NSL_FLOW",
+                                "PUMP_STORAGE_PUMPING",
+                                "index"
+                                ]])
+y = master_data["value_inc_vat"]
+model = sm.OLS(y, X).fit()
+model.summary()
+fitted_values = model.fittedvalues
+residuals = model.resid
+
+coef_df = model.params.drop('const').to_frame('coef')
+coef_df['std_err'] = model.bse.drop('const')
+# Calculating p-values to color-code significance
+coef_df['p_values'] = model.pvalues.drop('const')
+
+```
+
+
+```{python}
+fig = plt.figure(layout="constrained", figsize=(15,8))
+
+gs = GridSpec(3,3, figure = fig)
+
+ax1 = plt.subplot(gs.new_subplotspec((0,0), colspan=1))
+ax2 = plt.subplot(gs.new_subplotspec((0,1), colspan=1))
+ax3 = plt.subplot(gs.new_subplotspec((1,0), colspan=1))
+ax4 = plt.subplot(gs.new_subplotspec((1,1), colspan=1))
+
+daily_profile = master_data.groupby('SETTLEMENT_PERIOD')[['z_demand', 'z_radiation']].mean()
+
+#plt.figure(figsize=(12, 6))
+ax1.plot(daily_profile.index, daily_profile['z_demand'], marker='o', label='Avg Demand Profile', color='blue')
+ax1.plot(daily_profile.index, daily_profile['z_radiation'], marker='s', label='Avg Radiation Profile', color='orange')
+
+# Adding a visual highlight for the "Green Dent" (Midday)
+ax1.axvspan(20, 32, color='green', alpha=0.1, label='Solar Peak / Demand Dip')
+
+ax1.set_title("The 'Duck Curve' Relationship: Average Daily Profile (2025)")
+ax1.set_xlabel("Settlement Period (1 = 00:00, 48 = 23:30)")
+ax1.set_ylabel("Standardized Value")
+ax1.legend()
+ax1.grid(True, alpha=0.3)
+
+sns.regplot(data=master_data, x="shortwave_radiation",
+  y="value_inc_vat",
+  scatter_kws={"alpha":0.2, "color": "grey"}, line_kws={"color":"red"},ax=ax2)
+ax2.set_title("Correlation: Solar Radiation vs. Pricing", fontsize=14)
+
+ax3.scatter(fitted_values, residuals, alpha=0.3, color='teal')
+ax3.axhline(y=0, color='red', linestyle='--')
+ax3.set_title("Residual Diagnostic (Error Distribution)", fontsize=12)
+ax3.set_xlabel("Fitted Price (£)")
+ax3.set_ylabel("Residual (Error)")
+
+
+coef_df['coef'].plot(kind='barh', xerr=coef_df['std_err'], ax=ax4, color='navy')
+ax4.set_title("Feature Impact with 95% Confidence", fontsize=12)
+ax4.set_xlabel("Change in £ per Unit of Measure")
+
+for ax in fig.axes:
+  ax.spines[["top", "right"]].set_visible(False)
+```
+
+```{python}
+
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import r2_score, mean_absolute_error
+
+# Split data (using the features you already defined)
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+# Re-fit on train only
+final_model = sm.OLS(y_train, X_train).fit()
+y_pred = final_model.predict(X_test)
+
+print(f"Test R2 Score: {r2_score(y_test, y_pred):.3f}")
+
+```
+
+```{python}
+
+import joblib
+
+# This saves the 'brain' of your OLS model to a file
+joblib.dump(model, 'octopus_model.pkl')
+
+
+```
+
+
+```{python}
+master_data.to_csv("master_data.csv", index=False)
+```
+
+
+```{python}
+# 1. Create a DataFrame for comparison
+comparison_df = pd.DataFrame({
+    'Actual_Price': y_test,
+    'Predicted_Price': y_pred
+}, index=y_test.index)
+
+# 2. Sort by index to restore the time-series order
+comparison_df = comparison_df.sort_index()
+
+# 3. Add the error (Residuals)
+comparison_df['Error'] = comparison_df['Actual_Price'] - comparison_df['Predicted_Price']
+comparison_df['Abs_Error_Percent'] = (comparison_df['Error'].abs() / comparison_df['Actual_Price']).replace([np.inf, -np.inf], np.nan)
+
+print(comparison_df.head(10))
+```
+
+```{python}
+plt.figure(figsize=(15, 6))
+# Plotting a small slice (e.g., the last 100 observations) to see the detail
+plt.plot(comparison_df.index[-100:], comparison_df['Actual_Price'].iloc[-100:], label='Actual', alpha=0.7)
+plt.plot(comparison_df.index[-100:], comparison_df['Predicted_Price'].iloc[-100:], label='Predicted', linestyle='--', color='red')
+plt.title("Octopus Price Prediction: Last 100 Intervals (Out-of-Sample)")
+plt.ylabel("Price (£/MWh)")
+plt.legend()
+plt.show()
+```
+
+
+
+```{python}
+print(master_data["net_demand"].mean())
+print(master_data["net_demand"].std())
+
+```

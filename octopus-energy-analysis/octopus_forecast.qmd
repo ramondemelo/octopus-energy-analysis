@@ -132,42 +132,123 @@ demand_2023_2024_2025.resample("QE").sum()["ND"].plot(kind="bar")
 demand_2023_2024_2025.to_csv("demand_23_24_25.csv", index=False)
 ```
 ```{python}
-
+octo.head()
 ```
+
+```{python}
+import pandas as pd
+octo=pd.read_csv("octopus_prices_full_2025.csv")
+```
+
+```{python}
+octo = (octo.assign(valid_from = pd.to_datetime(octo["valid_from"]))
+    .drop(columns=["value_exc_vat", "valid_to", "payment_method"])
+    .set_index("valid_from")
+)
+```
+
+```{python}
+octo = octo.reset_index()
+octo = octo.assign(
+    trend = octo.index,
+    #hour = octo["valid_from"].dt.hour.astype("string"),
+    slot = octo["valid_from"].dt.strftime("%H:%M")
+).set_index("valid_from")
+
+
+octo = pd.get_dummies(octo, columns=["slot"], drop_first=True, dtype="int")
+
+octo["trend"] = range(len(octo))
+
+# Create a feature for the price 30 mins ago
+octo['price_lag_1'] = octo['value_inc_vat'].shift(1)
+#octo["hour"] = octo["hour"].astype("int")
+ 
+# IMPORTANT: You must drop the first row because it won't have a previous price
+octo = octo.dropna()
+
+octo.head()
+```
+
+
 ```{python}
 
-```
-```{python}
+import statsmodels.api as sm
 
-```
-```{python}
 
-```
-```{python}
+octo_train = octo.loc["2025-01-01": "2025-01-31"]
+octo_test  = octo.loc["2025-02-01": "2025-02-07"]
 
-```
-```{python}
 
-```
-```{python}
+X_train = sm.add_constant(octo_train.drop("value_inc_vat", axis=1))
+y_train = octo_train["value_inc_vat"]
 
+X_test = sm.add_constant(octo_test.drop("value_inc_vat", axis=1))
+Y_test = octo_test["value_inc_vat"]
 ```
 ```{python}
+import statsmodels.api as sm
 
+model = sm.OLS(y_train, X_train).fit()
+model.summary()
 ```
 ```{python}
+octo.head()
+```
+```{python}
+octo.info()
+```
+```{python}
+import matplotlib.pyplot as plt
 
-```
-```{python}
+# 1. Generate predictions
+test_preds = model.predict(X_test)
 
-```
-```{python}
+# 2. Plotting
+plt.figure(figsize=(12, 6))
+plt.plot(Y_test.index, Y_test, label='Actual Price', alpha=0.7, color='blue')
+plt.plot(Y_test.index, test_preds, label='Predicted Price', alpha=0.7, color='orange', linestyle='--')
 
+plt.title('Octopus Agile Price Prediction: Actual vs Predicted (Feb 2025)')
+plt.ylabel('Price (inc VAT)')
+plt.legend()
+plt.grid(True, alpha=0.3)
+plt.show()
 ```
 ```{python}
+from sklearn.metrics import mean_absolute_error, mean_squared_error
+import numpy as np
 
+# Calculate metrics
+mae = mean_absolute_error(Y_test, test_preds)
+rmse = np.sqrt(mean_squared_error(Y_test, test_preds))
+
+print(f"Mean Absolute Error (MAE): {mae:.2f}p")
+print(f"Root Mean Squared Error (RMSE): {rmse:.2f}p")
 ```
 ```{python}
+import pandas as pd
+
+# Create the comparison table
+comparison_df = pd.DataFrame({
+    'Actual Price': Y_test,
+    'Predicted Price': test_preds,
+    'Error (p)': Y_test - test_preds
+}).round(2)
+
+# Display the first 10 rows
+print(comparison_df.head(10))
+```
+```{python}
+# 1. Apply absolute value to the Error column first
+comparison_df['Abs_Error'] = comparison_df['Error (p)'].abs()
+
+# 2. Group by slot and calculate the mean of that absolute error
+error_by_slot = comparison_df.groupby('Slot')['Abs_Error'].mean().sort_values(ascending=False)
+
+print("Top 5 hardest slots to predict (highest MAE in p):")
+print(error_by_slot.head(5))
+
 
 ```
 ```{python}

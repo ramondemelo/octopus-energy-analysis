@@ -47,39 +47,48 @@ def fetch_octopus_live():
     return None
 
 # 3. PREDICTION ENGINE
-def run_prediction(live_df):
+def run_prediction(last_known_price, last_trend_value):
     model_path = '/home/ramondemelo/Documents/Electricity Analysis/octopus_model.pkl'
     model = joblib.load(model_path)
     
-    # Standard Features
-    live_df['const'] = 1.0
-    live_df['hour'] = datetime.now().hour
-    live_df['workday'] = 1 if datetime.now().weekday() < 5 else 0
+    # Define the 50 features your OLS model expects (must match your summary order)
+    # Note: Replace 'model_features' with the actual list from X_train.columns
+    model_features = model.params.index.tolist()
     
-    # --- SCARCITY ADJUSTMENT ---
-    # If demand is high (>30GW), we know OLS will under-predict.
-    # We can flag this for future model training.
-    live_df['is_scarcity'] = 1 if live_df['net_demand'].iloc[0] > 30000 else 0
+    # Determine the next two slots based on current time
+    now = datetime.now()
+    # Round to the next 30-min boundaries
+    start_time = now.replace(minute=30 if now.minute < 30 else 0, second=0, microsecond=0)
+    if now.minute >= 30:
+        start_time += timedelta(hours=1)
+        
+    future_times = [start_time, start_time + timedelta(minutes=30)]
+    
+    current_lag = last_known_price
+    results = []
 
-    # Ensure we use the actual wind from the weather dataframe if available
-    # instead of the 0 placeholder used in the main block
-    if 'wind_speed_10m' not in live_df or live_df['wind_speed_10m'].iloc[0] == 0:
-        # Note: In the next step, we should fetch actual wind to make this work
-        pass 
-
-    feature_list = [
-        "const", "ramp_rate_mw", "lag_1", "workday", "z_radiation", "z_demand", 
-        "net_demand", "shortwave_radiation", "temperature_2m", 
-        "EMBEDDED_SOLAR_GENERATION", "EMBEDDED_WIND_GENERATION", 
-        "hour", "wind_speed_10m", "NSL_FLOW", "PUMP_STORAGE_PUMPING", "index"
-    ]
-    
-    X_live = live_df[feature_list]
-    prediction = model.predict(X_live)
-    
-    # Logic Check: If demand is extreme but prediction is low, 
-    # it confirms the OLS 'Mean Reversion' bias.
-    return prediction[0]
+    for i, t in enumerate(future_times):
+        slot_str = t.strftime("%H:%M")
+        
+        # Build feature row
+        row = pd.DataFrame(0, index=[0], columns=model_features)
+        row['const'] = 1.0
+        row['price_lag_1'] = current_lag
+        row['trend'] = last_trend_value + (i + 1)
+        
+        # Activate the specific dummy slot (e.g., slot_11:30)
+        slot_col = f'slot_{slot_str}'
+        if slot_col in row.columns:
+            row[slot_col] = 1
+            
+        # Predict and store
+        pred = model.predict(row[model_features])[0]
+        results.append((slot_str, pred))
+        
+        # Update lag for the second prediction
+        current_lag = pred
+        
+    return results
 
 # 4. MAIN EXECUTION
 if __name__ == "__main__":
@@ -93,46 +102,47 @@ if __name__ == "__main__":
     print(f"🚀 Starting Live Collection...")
     
     try:
-        # Fetching
+        # Fetching fresh data
         df_neso = fetch_neso_live("8a4a771c-3929-4e56-93ad-cdf13219dea5")
         df_weather = fetch_weather_live()
         df_octopus = fetch_octopus_live()
 
-        # Combine
-        latest_neso = df_neso.iloc[[0]].reset_index(drop=True)
-        latest_weather = df_weather.iloc[[0]].reset_index(drop=True)
-        live_df = pd.concat([latest_neso, latest_weather], axis=1)
+        if df_octopus is None or df_octopus.empty:
+            raise ValueError("Could not fetch Octopus data. Prediction aborted.")
 
-        # Features
-        current_demand = df_neso.iloc[0]['ND']
-        previous_demand = df_neso.iloc[1]['ND'] 
-        live_df['net_demand'] = current_demand
-        live_df['lag_1'] = previous_demand
-        live_df['ramp_rate_mw'] = current_demand - previous_demand
-        
-        MEAN_D, STD_D = 22079.675780581085, 7738.213573528129
-        live_df['z_demand'] = (live_df['net_demand'] - MEAN_D) / STD_D
-        live_df['z_radiation'] = (live_df['shortwave_radiation'] - 100) / 50 
-        live_df['index'] = 1 
-
-        for col in ["NSL_FLOW", "PUMP_STORAGE_PUMPING", "wind_speed_10m"]:
-            live_df[col] = 0 
-
-        print(f"📊 Demand: {current_demand}MW | Ramp: {live_df['ramp_rate_mw'].iloc[0]}MW")
+        # Ensure Octopus data is sorted by time (latest first)
+        df_octopus = df_octopus.sort_values('valid_from', ascending=False)
 
         # Prediction logic
         if is_grid:
-            print("🧠 Running Model Prediction...")
+            print("🧠 Running Recursive Model Prediction...")
             try:
-                predicted_price = run_prediction(live_df)
-                prediction_p_kwh = predicted_price / 10
-                print(f"🔮 Predicted: {prediction_p_kwh:.2f}p/kWh (£{predicted_price:.2f}/MWh)")
+                # 1. Get the most recent price to use as lag_1
+                last_price = df_octopus['value_inc_vat'].iloc[0]
+
+                # 2. Get current trend (total count of historical records)
+                # This ensures the trend variable matches your training scale
+                with engine.connect() as conn:
+                    import sqlalchemy
+                    # Replace 'octopus_prices_live' with your master table name if different
+                    res = conn.execute(sqlalchemy.text("SELECT count(*) FROM octopus_prices_live"))
+                    current_trend = res.scalar() or 0
+
+                # 3. Run the prediction (returns list of tuples)
+                predictions = run_prediction(last_price, current_trend)
+                
+                print(f"--- Forecast Results (Last Actual: {last_price}p) ---")
+                for slot, price in predictions:
+                    print(f"🔮 Predicted for {slot}: {price:.2f}p/kWh")
+                print("--------------------------------------------------")
+
             except Exception as e:
                 print(f"❌ Prediction failed: {e}")
 
         # Database logic
         print("📦 Saving to Database...")
         if is_grid:
+            # We append the new Octopus rates we just fetched
             df_octopus.to_sql('octopus_prices_live', engine, if_exists='append', index=False)
             df_neso.to_sql('neso_demand_live', engine, if_exists='append', index=False)
         if is_weather:

@@ -167,7 +167,7 @@ octo['price_lag_1'] = octo['value_inc_vat'].shift(1)
 # IMPORTANT: You must drop the first row because it won't have a previous price
 octo = octo.dropna()
 
-octo.head()
+#octo.head()
 ```
 
 
@@ -252,11 +252,96 @@ print(error_by_slot.head(5))
 
 ```
 ```{python}
+import numpy as np
+import pandas as pd
+import statsmodels.api as sm
 
+# 1. Identify the last known price and time
+last_time = octo.index[-1]
+last_price = octo['value_inc_vat'].iloc[-1]
+
+# 2. Create the next two timestamps
+future_times = pd.date_range(start=last_time + pd.Timedelta(minutes=30), periods=2, freq='30T')
+
+# 3. Build the feature DataFrame
+future_df = pd.DataFrame(index=future_times)
+future_df['trend'] = octo['trend'].iloc[-1] + np.array([1, 2])
+future_df['slot'] = future_df.index.strftime("%H:%M")
+
+# 4. Create dummies and align columns with X_train
+future_df = pd.get_dummies(future_df, columns=['slot'], dtype=int)
+# This step ensures the new DF has all 47 slot columns, filled with 0 where appropriate
+future_df = future_df.reindex(columns=X_train.columns.drop('price_lag_1'), fill_value=0)
 ```
 ```{python}
+predictions = []
+current_lag = last_price
 
+# Ensure we are using the exact column list from the training set
+model_features = X_train.columns.tolist()
+
+for i in range(len(future_df)):
+    # 1. Prepare the row and add the lag
+    row = future_df.iloc[[i]].copy()
+    row['price_lag_1'] = current_lag
+    
+    # 2. Add the constant column ('const') manually to match X_train
+    if 'const' not in row.columns:
+        row['const'] = 1.0
+    
+    # 3. FORCE the columns to be in the exact same order as X_train
+    # This removes any extra columns and fixes the "alignment" error
+    row_aligned = row[model_features]
+    
+    # 4. Predict
+    pred = model.predict(row_aligned)[0]
+    predictions.append(pred)
+    
+    # 5. Update lag for the next step
+    current_lag = pred
+
+# Display results
+for time, p in zip(future_times, predictions):
+    print(f"Predicted Price for {time.strftime('%H:%M')}: {p:.2f}p")
 ```
 ```{python}
+import pandas as pd
+import numpy as np
 
+# 1. Identify the last actual price (from the 11:00 slot)
+# Replace this with your actual data lookup
+last_actual_price = octo.loc[octo.index.strftime('%H:%M') == '23:00', 'value_inc_vat'].iloc[-1]
+
+# 2. Define the future slots
+future_slots = ['23:00', '23:30']
+model_features = X_train.columns.tolist()
+
+# 3. Recursive Loop
+current_lag = last_actual_price
+predictions = {}
+
+for slot in future_slots:
+    # Create a single-row DataFrame for this slot
+    row = pd.DataFrame(columns=model_features, index=[0])
+    row.fillna(0, inplace=True) # Set all slot dummies to 0
+    
+    # Set the specific features
+    row['const'] = 1.0
+    row['price_lag_1'] = current_lag
+    row['trend'] = octo['trend'].max() + 1 # Increment your trend
+    
+    # Set the dummy for the specific slot to 1
+    slot_col = f'slot_{slot}'
+    if slot_col in row.columns:
+        row[slot_col] = 1
+    
+    # Predict
+    pred = model.predict(row[model_features])[0]
+    predictions[slot] = pred
+    
+    # Update the lag for the next iteration
+    current_lag = pred
+
+print(f"Predicted Price for 23:00: {predictions['23:00']:.2f}p")
+print(f"Predicted Price for 23:30: {predictions['23:30']:.2f}p")
 ```

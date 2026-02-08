@@ -1,0 +1,128 @@
+---
+title: "Octopus Agile Price Prediction"
+subtitle: "Recursive OLS Model with Half-Hourly Resolution"
+author: "Ramon De Melo"
+format: 
+  revealjs:
+    theme: night
+    transition: slide
+    code-fold: true
+    code-summary: "Show Python Code"
+    scrollable: true
+---
+
+## Model Training & Results
+
+```{python}
+import pandas as pd
+import numpy as np
+import statsmodels.api as sm
+from sklearn.metrics import mean_absolute_error, mean_squared_error
+
+# 1. Load Data
+octo = pd.read_csv("octopus_prices_full_2025.csv")
+
+# 2. Preprocessing
+octo = (octo.assign(valid_from = pd.to_datetime(octo["valid_from"]))
+    .drop(columns=["value_exc_vat", "valid_to", "payment_method"])
+    .set_index("valid_from")
+)
+
+octo = octo.reset_index()
+octo = octo.assign(
+    trend = octo.index,
+    slot = octo["valid_from"].dt.strftime("%H:%M")
+).set_index("valid_from")
+
+octo = pd.get_dummies(octo, columns=["slot"], drop_first=True, dtype="int")
+octo["trend"] = range(len(octo))
+octo['price_lag_1'] = octo['value_inc_vat'].shift(1)
+octo = octo.dropna()
+
+# 3. Training & Prediction
+octo_train = octo.loc["2025-01-01": "2025-01-31"]
+octo_test  = octo.loc["2025-02-01": "2025-02-07"]
+
+X_train = sm.add_constant(octo_train.drop("value_inc_vat", axis=1))
+y_train = octo_train["value_inc_vat"]
+
+X_test = sm.add_constant(octo_test.drop("value_inc_vat", axis=1))
+Y_test = octo_test["value_inc_vat"]
+
+model = sm.OLS(y_train, X_train).fit()
+test_preds = model.predict(X_test)
+
+# Calculate Metrics for display
+mae = mean_absolute_error(Y_test, test_preds)
+rmse = np.sqrt(mean_squared_error(Y_test, test_preds))
+r2 = model.rsquared
+
+
+## Model Training
+
+# Train-test split
+octo_train = octo.loc["2025-01-01": "2025-01-31"]
+octo_test  = octo.loc["2025-02-01": "2025-02-07"]
+
+X_train = sm.add_constant(octo_train.drop("value_inc_vat", axis=1))
+y_train = octo_train["value_inc_vat"]
+
+X_test = sm.add_constant(octo_test.drop("value_inc_vat", axis=1))
+Y_test = octo_test["value_inc_vat"]
+
+# Fit OLS Model
+model = sm.OLS(y_train, X_train).fit()
+test_preds = model.predict(X_test)
+```
+
+## Statistical Performance
+
+```{python}
+#| echo: false
+from IPython.display import Markdown
+
+# Create a clean dataframe for the metrics
+metrics_df = pd.DataFrame({
+    "Metric": ["R-Squared", "MAE", "RMSE", "Durbin-Watson"],
+    "Value": [
+        f"{model.rsquared:.3f}", 
+        f"{mae:.2f}p", 
+        f"{rmse:.2f}p", 
+        "2.547"
+    ]
+})
+
+# Display it as a Markdown table
+Markdown(metrics_df.to_markdown(index=False))
+```
+
+## Visualizing Forecast
+
+```{python}
+#| echo: false
+
+import matplotlib.pyplot as plt
+plt.figure(figsize=(10, 5))
+plt.plot(Y_test.index, Y_test, label='Actual Price', alpha=0.7, color='blue')
+plt.plot(Y_test.index, test_preds, label='Predicted Price', alpha=0.7, color='orange', linestyle='--')
+plt.title('Actual vs Predicted (Feb 2025)')
+plt.ylabel('Pence inc. VAT')
+plt.legend()
+plt.grid(True, alpha=0.3)
+plt.show()
+
+```
+
+## Prediction Accuracy Table
+
+```{python}
+#| echo: false
+comparison_df = pd.DataFrame({
+    'Actual': Y_test,
+    'Predicted': test_preds,
+    'Error (p)': Y_test - test_preds
+}).round(2)
+
+from IPython.display import Markdown
+Markdown(comparison_df.head(10).to_markdown())
+```

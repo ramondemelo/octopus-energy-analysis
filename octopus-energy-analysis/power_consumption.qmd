@@ -20,10 +20,6 @@ jupyter:
     name: python3
 ---
 
-
-How many heatpumps would it take to replace energy imports?
-How much renewable penetration would this replacement represent?
-
 # Demand 
 
 
@@ -197,20 +193,6 @@ ax4.spines["bottom"].set_visible(False)
 ax4.set_xlabel("");
 ```
 
-```{python}
-demand_by_month["ND"].mean()
-```
-
-```{python}
-demand_by_quarter["ND"].std()
-```
-
-```{python}
-demand_by_day_of_week
-```
-
-Quarter one has the highest demand perhaps due to factories working at full
-capacity to deliver fulfill orders due throughout the year
 
 # Total Green Energy
 
@@ -687,33 +669,20 @@ demand_composition_set_period = (demand
 demand_composition_set_period.drop(index=[49,50], inplace=True)
 demand_composition_set_period.plot(kind="bar", ax=ax4, stacked=True)
 
-# ax4.spines["top"].set_visible(False)
-# ax4.spines["right"].set_visible(False)
-# ax4.spines["bottom"].set_visible(False)
+ax4.spines["top"].set_visible(False)
+ax4.spines["right"].set_visible(False)
+ax4.spines["bottom"].set_visible(False)
 
-for ax in axes.flat:
-    ax.spines[["top", "right", "bottom"]].set_visible(False)
+# for ax in axes.flat:
+#     ax.spines[["top", "right", "bottom"]].set_visible(False)
 
-ax4.legend("");
+# ax4.legend("");
 ```
 
 
-```{python}
-fig, ax = plt.subplots()
 
-(demand.pivot_table(index="SETTLEMENT_PERIOD", values=["total_green", "domestic_dirty_mw", "net_imports"])
-#.apply(lambda x: x *100 / sum(x), axis = 1)
-.plot.area(ax=ax, alpha=0.5, stacked=True))
 
-ax.axvspan(xmax= 35, xmin= 45, color="grey", alpha=0.5)
-ax.text(35, 45, """Peak Demand\nhousehold/factory\nconsumption overllap""", fontsize=8)
-```
 
-# IMPORT SOURCES ANALYSIS
-
-```{python}
-demand["IFA_FLOW"].plot()
-```
 
 
 
